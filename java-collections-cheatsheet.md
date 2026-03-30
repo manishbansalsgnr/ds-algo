@@ -23,6 +23,15 @@
 14. [Math Utility Methods](#14-math-utility-methods)
 15. [Common Patterns & Idioms](#15-common-patterns--idioms)
 16. [When to Use What — Decision Guide](#16-when-to-use-what--decision-guide)
+17. [Comparable vs Comparator — Deep Dive](#17-comparable-vs-comparator--deep-dive)
+18. [HashMap Internals — Interview Theory](#18-hashmap-internals--interview-theory)
+19. [equals() and hashCode() Contract](#19-equals-and-hashcode-contract)
+20. [Iterator Patterns & Pitfalls](#20-iterator-patterns--pitfalls)
+21. [LRU Cache with LinkedHashMap](#21-lru-cache-with-linkedhashmap)
+22. [Concurrent Collections](#22-concurrent-collections)
+23. [Optional API](#23-optional-api)
+24. [Algorithm Templates (LeetCode Essentials)](#24-algorithm-templates-leetcode-essentials)
+25. [Common Interview Pitfalls & Edge Cases](#25-common-interview-pitfalls--edge-cases)
 
 ---
 
@@ -748,4 +757,959 @@ int[][] dirs8 = {{0,1},{0,-1},{1,0},{-1,0},
 ---
 
 > **Tip:** In interviews, always state the time and space complexity of your solution. Knowing these tables helps you pick the right data structure instantly and justify your choice.
+
+---
+
+## 17. Comparable vs Comparator — Deep Dive
+
+### Comparable (Natural Ordering)
+
+The class itself defines its "natural" order by implementing `Comparable<T>`.
+
+```java
+class Interval implements Comparable<Interval> {
+    int start, end;
+    Interval(int s, int e) { this.start = s; this.end = e; }
+
+    @Override
+    public int compareTo(Interval o) {
+        return this.start != o.start 
+            ? Integer.compare(this.start, o.start) 
+            : Integer.compare(this.end, o.end);
+    }
+}
+
+// Now works with: Collections.sort(list), TreeSet, TreeMap key, PriorityQueue
+```
+
+### Comparator (External / Custom Ordering)
+
+Define ordering externally without modifying the class.
+
+```java
+// All equivalent ways to create comparators:
+
+// 1. Lambda
+Comparator<String> byLength = (a, b) -> Integer.compare(a.length(), b.length());
+
+// 2. Method reference with comparing*
+Comparator<String> byLength = Comparator.comparingInt(String::length);
+
+// 3. Chaining (primary + secondary + ...)
+Comparator<int[]> byInterval = Comparator
+    .comparingInt((int[] a) -> a[0])
+    .thenComparingInt(a -> a[1]);
+
+// 4. Reverse
+Comparator<Integer> descending = Comparator.reverseOrder();
+Comparator<String> byLengthDesc = Comparator.comparingInt(String::length).reversed();
+
+// 5. Null-safe comparators
+Comparator<String> nullsFirst = Comparator.nullsFirst(Comparator.naturalOrder());
+Comparator<String> nullsLast = Comparator.nullsLast(Comparator.naturalOrder());
+```
+
+### Comparator Quick Reference
+
+| Method | Description | Example |
+|--------|-------------|---------|
+| `Comparator.naturalOrder()` | a, b, c ... | Ascending |
+| `Comparator.reverseOrder()` | z, y, x ... | Descending |
+| `Comparator.comparingInt(fn)` | Compare by int-returning function | `comparingInt(String::length)` |
+| `Comparator.comparingLong(fn)` | Compare by long | `comparingLong(File::size)` |
+| `Comparator.comparingDouble(fn)` | Compare by double | `comparingDouble(p -> p.distance)` |
+| `Comparator.comparing(fn)` | Compare by Comparable field | `comparing(Person::getName)` |
+| `cmp.thenComparing(fn)` | Secondary sort | `byAge.thenComparing(byName)` |
+| `cmp.thenComparingInt(fn)` | Secondary by int | `byName.thenComparingInt(p -> p.age)` |
+| `cmp.reversed()` | Reverse existing comparator | `byLength.reversed()` |
+| `Comparator.nullsFirst(cmp)` | Nulls sort before non-nulls | Null-safe sorting |
+| `Comparator.nullsLast(cmp)` | Nulls sort after non-nulls | Null-safe sorting |
+
+### Integer.compare vs Subtraction — Why It Matters
+
+```java
+// DANGEROUS: can overflow
+(a, b) -> a - b    // if a = Integer.MAX_VALUE, b = -1 → overflow → wrong sign!
+
+// SAFE: always use this
+(a, b) -> Integer.compare(a, b)
+
+// SAFE alternatives
+Comparator.comparingInt(x -> x)
+Comparator.naturalOrder()
+```
+
+---
+
+## 18. HashMap Internals — Interview Theory
+
+### How HashMap Works
+
+| Concept | Detail |
+|---------|--------|
+| **Backing structure** | Array of `Node<K,V>` buckets (default 16) |
+| **Hashing** | `key.hashCode()` → spread bits → `index = hash & (n-1)` |
+| **Collision handling** | Chaining — linked list at each bucket |
+| **Treeification (Java 8+)** | When a bucket has ≥ 8 entries, linked list → red-black tree (O(log n) lookup) |
+| **Untreeification** | When a bucket shrinks to ≤ 6 entries, tree → linked list |
+| **Load factor** | Default 0.75 — rehash when `size > capacity × loadFactor` |
+| **Rehashing** | Double the array, re-distribute all entries — O(n) |
+| **Worst case** | O(n) if all keys hash to same bucket (pre-Java 8), O(log n) with treeification |
+
+### Time Complexity (Honest Answer for Interviews)
+
+| Operation | Average | Worst Case |
+|-----------|:-------:|:----------:|
+| `get` / `containsKey` | O(1) | O(log n)* |
+| `put` / `remove` | O(1) | O(log n)* |
+| Iteration | O(n + capacity) | O(n + capacity) |
+
+> \* Worst case was O(n) before Java 8; now O(log n) due to treeification.
+
+### HashSet Internals
+
+`HashSet` is literally a `HashMap<E, PRESENT>` where `PRESENT` is a dummy `Object`. Every `HashSet` operation delegates to the underlying `HashMap`.
+
+### When to Mention in Interviews
+
+- "Why is HashMap O(1)?" → hashing + modular indexing
+- "What if two keys have the same hashCode?" → chaining → treeification at 8
+- "When does HashMap become slow?" → poor hashCode causing clustering
+- "What is the load factor?" → 0.75, trade-off between space and collision probability
+
+---
+
+## 19. equals() and hashCode() Contract
+
+### The Contract (Must Follow for HashMap / HashSet to Work)
+
+| Rule | Description |
+|------|-------------|
+| **Consistency** | If `a.equals(b)` is `true`, then `a.hashCode() == b.hashCode()` must be `true` |
+| **Converse is NOT required** | Equal hashCodes do NOT mean equals is true (collisions are OK) |
+| **Reflexive** | `a.equals(a)` is always `true` |
+| **Symmetric** | `a.equals(b)` ↔ `b.equals(a)` |
+| **Transitive** | `a.equals(b)` and `b.equals(c)` → `a.equals(c)` |
+
+### Using Custom Objects as HashMap Keys
+
+```java
+class Point {
+    int x, y;
+    Point(int x, int y) { this.x = x; this.y = y; }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Point)) return false;
+        Point p = (Point) o;
+        return x == p.x && y == p.y;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(x, y);    // or: 31 * x + y
+    }
+}
+
+// Now safe to use as HashMap key or in HashSet
+Map<Point, Integer> map = new HashMap<>();
+map.put(new Point(1, 2), 10);
+map.get(new Point(1, 2)); // returns 10 (because equals + hashCode match)
+```
+
+### LeetCode Shortcut — Encoding Keys as Strings
+
+```java
+// Instead of custom equals/hashCode, encode composite keys as strings:
+String key = x + "," + y;                    // point
+String key = Arrays.toString(counts);        // frequency array
+String key = row + "," + col + "," + dir;    // state in BFS
+```
+
+---
+
+## 20. Iterator Patterns & Pitfalls
+
+### Safe Removal During Iteration
+
+```java
+// WRONG — throws ConcurrentModificationException
+for (Integer x : list) {
+    if (x < 0) list.remove(x);   // modifying collection during enhanced for-loop
+}
+
+// CORRECT — use Iterator explicitly
+Iterator<Integer> it = list.iterator();
+while (it.hasNext()) {
+    if (it.next() < 0) it.remove();   // safe removal via iterator
+}
+
+// CORRECT — use removeIf (Java 8+, cleaner)
+list.removeIf(x -> x < 0);
+
+// CORRECT — iterate backward by index (ArrayList only)
+for (int i = list.size() - 1; i >= 0; i--) {
+    if (list.get(i) < 0) list.remove(i);
+}
+```
+
+### ListIterator (Bidirectional — List Only)
+
+| Method | Description |
+|--------|-------------|
+| `hasNext()` / `next()` | Forward iteration |
+| `hasPrevious()` / `previous()` | Backward iteration |
+| `nextIndex()` / `previousIndex()` | Index of next/prev element |
+| `set(e)` | Replace last returned element |
+| `add(e)` | Insert before next element |
+| `remove()` | Remove last returned element |
+
+```java
+ListIterator<Integer> lit = list.listIterator(list.size()); // start at end
+while (lit.hasPrevious()) {
+    System.out.println(lit.previous()); // reverse iteration
+}
+```
+
+---
+
+## 21. LRU Cache with LinkedHashMap
+
+Classic interview question (LeetCode #146). `LinkedHashMap` with access-order gives you LRU for free.
+
+```java
+class LRUCache extends LinkedHashMap<Integer, Integer> {
+    private final int capacity;
+
+    public LRUCache(int capacity) {
+        super(capacity, 0.75f, true);   // true = access-order (not insertion-order)
+        this.capacity = capacity;
+    }
+
+    @Override
+    protected boolean removeEldestEntry(Map.Entry<Integer, Integer> eldest) {
+        return size() > capacity;       // auto-evict when over capacity
+    }
+
+    public int get(int key) {
+        return super.getOrDefault(key, -1);
+    }
+
+    public void put(int key, int value) {
+        super.put(key, value);
+    }
+}
+```
+
+### LinkedHashMap Constructor Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `initialCapacity` | Initial bucket count |
+| `loadFactor` | Rehash threshold (default 0.75) |
+| `accessOrder` | `false` = insertion order (default), `true` = access order (LRU) |
+
+---
+
+## 22. Concurrent Collections
+
+> Brief overview — interviewers may ask about thread safety even in DSA rounds.
+
+| Class | Thread-Safe Alternative To | Key Difference |
+|-------|---------------------------|----------------|
+| `ConcurrentHashMap` | `HashMap` | Segment-level locking (Java 8: per-bucket CAS); no `null` keys/values |
+| `CopyOnWriteArrayList` | `ArrayList` | Copies entire array on write; reads are lock-free |
+| `CopyOnWriteArraySet` | `HashSet` | Backed by `CopyOnWriteArrayList` |
+| `ConcurrentLinkedQueue` | `LinkedList` (queue) | Lock-free CAS-based FIFO queue |
+| `ConcurrentLinkedDeque` | `ArrayDeque` | Lock-free CAS-based deque |
+| `BlockingQueue` (interface) | `Queue` | `put()` blocks when full, `take()` blocks when empty |
+| `ArrayBlockingQueue` | — | Bounded blocking queue backed by array |
+| `LinkedBlockingQueue` | — | Optionally bounded blocking queue |
+| `PriorityBlockingQueue` | `PriorityQueue` | Thread-safe priority queue |
+| `ConcurrentSkipListMap` | `TreeMap` | Lock-free sorted map, O(log n) |
+| `ConcurrentSkipListSet` | `TreeSet` | Lock-free sorted set, O(log n) |
+
+### Collections.synchronized* vs Concurrent*
+
+| Aspect | `Collections.synchronizedMap()` | `ConcurrentHashMap` |
+|--------|:-------------------------------:|:-------------------:|
+| Locking | Single lock on entire map | Per-bucket / CAS |
+| Performance | Poor under contention | **Much better** |
+| Iteration | Must manually synchronize | Weakly consistent (safe) |
+| Null keys/values | Allowed | **Not allowed** |
+| Compound ops (putIfAbsent) | Not atomic | **Atomic** |
+
+---
+
+## 23. Optional API
+
+Commonly returned by Stream terminal operations. Know how to unwrap safely.
+
+| Method | Description | Example |
+|--------|-------------|---------|
+| `Optional.of(val)` | Wrap non-null value | `Optional.of(5)` |
+| `Optional.ofNullable(val)` | Wrap nullable value | `Optional.ofNullable(map.get(k))` |
+| `Optional.empty()` | Empty optional | `Optional.empty()` |
+| `isPresent()` | Has value? | `opt.isPresent()` |
+| `isEmpty()` | No value? (Java 11+) | `opt.isEmpty()` |
+| `get()` | Get value (throws if empty) | `opt.get()` |
+| `orElse(default)` | Get or fallback | `opt.orElse(0)` |
+| `orElseGet(supplier)` | Get or compute fallback lazily | `opt.orElseGet(() -> compute())` |
+| `orElseThrow()` | Get or throw NoSuchElement | `opt.orElseThrow()` |
+| `ifPresent(action)` | Do something if present | `opt.ifPresent(System.out::println)` |
+| `map(fn)` | Transform if present | `opt.map(x -> x * 2)` |
+| `flatMap(fn)` | Transform returning Optional | `opt.flatMap(x -> findById(x))` |
+| `filter(pred)` | Keep if predicate matches | `opt.filter(x -> x > 0)` |
+
+```java
+// Common in problem solving — safely unwrap stream results
+int max = Arrays.stream(nums).max().orElse(Integer.MIN_VALUE);
+String first = list.stream().filter(s -> s.startsWith("a")).findFirst().orElse("");
+```
+
+---
+
+## 24. Algorithm Templates (LeetCode Essentials)
+
+### 24.1 Binary Search — Standard Template
+
+```java
+// Find exact target — returns index or -1
+int binarySearch(int[] nums, int target) {
+    int lo = 0, hi = nums.length - 1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;    // avoid overflow
+        if (nums[mid] == target) return mid;
+        else if (nums[mid] < target) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return -1;
+}
+```
+
+### 24.2 Binary Search — Lower Bound (First >= target)
+
+```java
+// Returns first index where nums[i] >= target (insertion point)
+int lowerBound(int[] nums, int target) {
+    int lo = 0, hi = nums.length;
+    while (lo < hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (nums[mid] < target) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+```
+
+### 24.3 Binary Search — Upper Bound (First > target)
+
+```java
+// Returns first index where nums[i] > target
+int upperBound(int[] nums, int target) {
+    int lo = 0, hi = nums.length;
+    while (lo < hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (nums[mid] <= target) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+```
+
+### 24.4 Binary Search on Answer (Monotonic Predicate)
+
+```java
+// When you can't search an array but can check "is answer X feasible?"
+// e.g., Koko eating bananas, split array largest sum, ship packages
+int lo = minPossible, hi = maxPossible;
+while (lo < hi) {
+    int mid = lo + (hi - lo) / 2;
+    if (feasible(mid)) hi = mid;      // try smaller
+    else lo = mid + 1;                 // need bigger
+}
+return lo; // minimum feasible answer
+```
+
+### 24.5 BFS Template (Shortest Path in Unweighted Graph / Grid)
+
+```java
+int bfs(int[][] grid, int[] start, int[] end) {
+    int m = grid.length, n = grid[0].length;
+    Queue<int[]> queue = new ArrayDeque<>();
+    boolean[][] visited = new boolean[m][n];
+    int[][] dirs = {{0,1},{0,-1},{1,0},{-1,0}};
+
+    queue.offer(start);
+    visited[start[0]][start[1]] = true;
+    int steps = 0;
+
+    while (!queue.isEmpty()) {
+        int size = queue.size();               // process level by level
+        for (int i = 0; i < size; i++) {
+            int[] cur = queue.poll();
+            if (cur[0] == end[0] && cur[1] == end[1]) return steps;
+
+            for (int[] d : dirs) {
+                int nr = cur[0] + d[0], nc = cur[1] + d[1];
+                if (nr >= 0 && nr < m && nc >= 0 && nc < n
+                        && !visited[nr][nc] && grid[nr][nc] != 1) {
+                    visited[nr][nc] = true;
+                    queue.offer(new int[]{nr, nc});
+                }
+            }
+        }
+        steps++;
+    }
+    return -1; // unreachable
+}
+```
+
+### 24.6 DFS Template — Recursive (Grid / Graph)
+
+```java
+// Grid DFS (e.g., number of islands, flood fill)
+void dfs(int[][] grid, int r, int c, boolean[][] visited) {
+    int m = grid.length, n = grid[0].length;
+    if (r < 0 || r >= m || c < 0 || c >= n || visited[r][c] || grid[r][c] == 0)
+        return;
+    visited[r][c] = true;
+    dfs(grid, r + 1, c, visited);
+    dfs(grid, r - 1, c, visited);
+    dfs(grid, r, c + 1, visited);
+    dfs(grid, r, c - 1, visited);
+}
+
+// Graph DFS (adjacency list)
+void dfs(Map<Integer, List<Integer>> graph, int node, Set<Integer> visited) {
+    if (!visited.add(node)) return;
+    for (int neighbor : graph.getOrDefault(node, List.of())) {
+        dfs(graph, neighbor, visited);
+    }
+}
+```
+
+### 24.7 DFS Template — Iterative (Stack-Based)
+
+```java
+void dfsIterative(Map<Integer, List<Integer>> graph, int start) {
+    Deque<Integer> stack = new ArrayDeque<>();
+    Set<Integer> visited = new HashSet<>();
+    stack.push(start);
+
+    while (!stack.isEmpty()) {
+        int node = stack.pop();
+        if (!visited.add(node)) continue;
+        // process node
+        for (int neighbor : graph.getOrDefault(node, List.of())) {
+            if (!visited.contains(neighbor)) {
+                stack.push(neighbor);
+            }
+        }
+    }
+}
+```
+
+### 24.8 Sliding Window — Variable Size
+
+```java
+// Find smallest subarray with sum >= target (or longest substring with at most K distinct chars, etc.)
+int slidingWindow(int[] nums, int target) {
+    int left = 0, sum = 0, minLen = Integer.MAX_VALUE;
+    for (int right = 0; right < nums.length; right++) {
+        sum += nums[right];                   // expand window
+        while (sum >= target) {               // shrink while valid
+            minLen = Math.min(minLen, right - left + 1);
+            sum -= nums[left++];
+        }
+    }
+    return minLen == Integer.MAX_VALUE ? 0 : minLen;
+}
+```
+
+### 24.9 Sliding Window — Fixed Size
+
+```java
+// Max sum of subarray of size k
+int fixedWindow(int[] nums, int k) {
+    int sum = 0, maxSum = Integer.MIN_VALUE;
+    for (int i = 0; i < nums.length; i++) {
+        sum += nums[i];
+        if (i >= k) sum -= nums[i - k];      // remove element leaving window
+        if (i >= k - 1) maxSum = Math.max(maxSum, sum);
+    }
+    return maxSum;
+}
+```
+
+### 24.10 Two Pointers — Sorted Array / Opposite Ends
+
+```java
+// Two sum in sorted array
+int[] twoSum(int[] nums, int target) {
+    int lo = 0, hi = nums.length - 1;
+    while (lo < hi) {
+        int sum = nums[lo] + nums[hi];
+        if (sum == target) return new int[]{lo, hi};
+        else if (sum < target) lo++;
+        else hi--;
+    }
+    return new int[]{};
+}
+```
+
+### 24.11 Two Pointers — Fast & Slow (Linked List / Cycle Detection)
+
+```java
+// Floyd's cycle detection
+boolean hasCycle(ListNode head) {
+    ListNode slow = head, fast = head;
+    while (fast != null && fast.next != null) {
+        slow = slow.next;
+        fast = fast.next.next;
+        if (slow == fast) return true;
+    }
+    return false;
+}
+
+// Find middle of linked list
+ListNode findMiddle(ListNode head) {
+    ListNode slow = head, fast = head;
+    while (fast != null && fast.next != null) {
+        slow = slow.next;
+        fast = fast.next.next;
+    }
+    return slow; // middle (right-middle if even length)
+}
+```
+
+### 24.12 Backtracking Template
+
+```java
+// Subsets / permutations / combinations
+List<List<Integer>> result = new ArrayList<>();
+
+void backtrack(int[] nums, int start, List<Integer> path) {
+    result.add(new ArrayList<>(path));        // add current state (for subsets)
+
+    for (int i = start; i < nums.length; i++) {
+        // skip duplicates (if nums is sorted and duplicates exist)
+        if (i > start && nums[i] == nums[i - 1]) continue;
+
+        path.add(nums[i]);                    // choose
+        backtrack(nums, i + 1, path);         // explore (i+1 for combinations, i for reuse)
+        path.remove(path.size() - 1);         // un-choose
+    }
+}
+
+// For permutations: use a boolean[] used array instead of start index
+void permute(int[] nums, List<Integer> path, boolean[] used) {
+    if (path.size() == nums.length) {
+        result.add(new ArrayList<>(path));
+        return;
+    }
+    for (int i = 0; i < nums.length; i++) {
+        if (used[i]) continue;
+        if (i > 0 && nums[i] == nums[i-1] && !used[i-1]) continue; // skip dup
+        used[i] = true;
+        path.add(nums[i]);
+        permute(nums, path, used);
+        path.remove(path.size() - 1);
+        used[i] = false;
+    }
+}
+```
+
+### 24.13 Union-Find (Disjoint Set Union)
+
+```java
+class UnionFind {
+    int[] parent, rank;
+    int components;
+
+    UnionFind(int n) {
+        parent = new int[n];
+        rank = new int[n];
+        components = n;
+        for (int i = 0; i < n; i++) parent[i] = i;
+    }
+
+    int find(int x) {
+        if (parent[x] != x) parent[x] = find(parent[x]);  // path compression
+        return parent[x];
+    }
+
+    boolean union(int x, int y) {
+        int px = find(x), py = find(y);
+        if (px == py) return false;           // already connected
+        if (rank[px] < rank[py]) { int t = px; px = py; py = t; }
+        parent[py] = px;                      // union by rank
+        if (rank[px] == rank[py]) rank[px]++;
+        components--;
+        return true;
+    }
+
+    boolean connected(int x, int y) {
+        return find(x) == find(y);
+    }
+}
+// Time: O(α(n)) ≈ O(1) per operation with path compression + union by rank
+```
+
+### 24.14 Topological Sort (Kahn's BFS — DAG)
+
+```java
+List<Integer> topologicalSort(int n, int[][] edges) {
+    List<List<Integer>> graph = new ArrayList<>();
+    int[] indegree = new int[n];
+    for (int i = 0; i < n; i++) graph.add(new ArrayList<>());
+
+    for (int[] e : edges) {
+        graph.get(e[0]).add(e[1]);
+        indegree[e[1]]++;
+    }
+
+    Queue<Integer> queue = new ArrayDeque<>();
+    for (int i = 0; i < n; i++) {
+        if (indegree[i] == 0) queue.offer(i);
+    }
+
+    List<Integer> order = new ArrayList<>();
+    while (!queue.isEmpty()) {
+        int node = queue.poll();
+        order.add(node);
+        for (int neighbor : graph.get(node)) {
+            if (--indegree[neighbor] == 0) queue.offer(neighbor);
+        }
+    }
+
+    return order.size() == n ? order : List.of();  // empty if cycle exists
+}
+```
+
+### 24.15 Monotonic Stack
+
+```java
+// Next Greater Element — for each element, find the next one that is larger
+int[] nextGreater(int[] nums) {
+    int n = nums.length;
+    int[] result = new int[n];
+    Arrays.fill(result, -1);
+    Deque<Integer> stack = new ArrayDeque<>(); // stores indices
+
+    for (int i = 0; i < n; i++) {
+        while (!stack.isEmpty() && nums[stack.peek()] < nums[i]) {
+            result[stack.pop()] = nums[i];
+        }
+        stack.push(i);
+    }
+    return result;
+}
+
+// Largest Rectangle in Histogram — classic monotonic stack problem
+int largestRectangle(int[] heights) {
+    Deque<Integer> stack = new ArrayDeque<>();
+    int maxArea = 0;
+    for (int i = 0; i <= heights.length; i++) {
+        int h = (i == heights.length) ? 0 : heights[i];
+        while (!stack.isEmpty() && heights[stack.peek()] > h) {
+            int height = heights[stack.pop()];
+            int width = stack.isEmpty() ? i : i - stack.peek() - 1;
+            maxArea = Math.max(maxArea, height * width);
+        }
+        stack.push(i);
+    }
+    return maxArea;
+}
+```
+
+### 24.16 Trie (Prefix Tree)
+
+```java
+class Trie {
+    Trie[] children = new Trie[26];
+    boolean isEnd;
+
+    void insert(String word) {
+        Trie node = this;
+        for (char c : word.toCharArray()) {
+            int i = c - 'a';
+            if (node.children[i] == null) node.children[i] = new Trie();
+            node = node.children[i];
+        }
+        node.isEnd = true;
+    }
+
+    boolean search(String word) {
+        Trie node = find(word);
+        return node != null && node.isEnd;
+    }
+
+    boolean startsWith(String prefix) {
+        return find(prefix) != null;
+    }
+
+    private Trie find(String s) {
+        Trie node = this;
+        for (char c : s.toCharArray()) {
+            int i = c - 'a';
+            if (node.children[i] == null) return null;
+            node = node.children[i];
+        }
+        return node;
+    }
+}
+```
+
+### 24.17 Prefix Sum (1D and 2D)
+
+```java
+// 1D Prefix Sum — range sum query in O(1)
+int[] prefix = new int[nums.length + 1];
+for (int i = 0; i < nums.length; i++) {
+    prefix[i + 1] = prefix[i] + nums[i];
+}
+// sum of nums[l..r] = prefix[r+1] - prefix[l]
+
+// 2D Prefix Sum — submatrix sum query in O(1)
+int[][] pre = new int[m + 1][n + 1];
+for (int i = 1; i <= m; i++) {
+    for (int j = 1; j <= n; j++) {
+        pre[i][j] = matrix[i-1][j-1] + pre[i-1][j] + pre[i][j-1] - pre[i-1][j-1];
+    }
+}
+// sum of submatrix (r1,c1) to (r2,c2):
+// pre[r2+1][c2+1] - pre[r1][c2+1] - pre[r2+1][c1] + pre[r1][c1]
+```
+
+### 24.18 Dynamic Programming — Common Patterns
+
+```java
+// 1D DP — Fibonacci / Climbing Stairs
+int[] dp = new int[n + 1];
+dp[0] = 1; dp[1] = 1;
+for (int i = 2; i <= n; i++) dp[i] = dp[i-1] + dp[i-2];
+
+// 1D DP — Space optimized (only keep last 2 states)
+int prev2 = 1, prev1 = 1;
+for (int i = 2; i <= n; i++) {
+    int curr = prev1 + prev2;
+    prev2 = prev1;
+    prev1 = curr;
+}
+
+// 2D DP — 0/1 Knapsack
+int[][] dp = new int[n + 1][capacity + 1];
+for (int i = 1; i <= n; i++) {
+    for (int w = 0; w <= capacity; w++) {
+        dp[i][w] = dp[i-1][w];                                  // skip item
+        if (weight[i-1] <= w)
+            dp[i][w] = Math.max(dp[i][w], dp[i-1][w - weight[i-1]] + value[i-1]); // take
+    }
+}
+
+// Longest Common Subsequence (LCS)
+int[][] dp = new int[m + 1][n + 1];
+for (int i = 1; i <= m; i++) {
+    for (int j = 1; j <= n; j++) {
+        if (s1.charAt(i-1) == s2.charAt(j-1))
+            dp[i][j] = dp[i-1][j-1] + 1;
+        else
+            dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
+    }
+}
+
+// Longest Increasing Subsequence (LIS) — O(n log n)
+List<Integer> tails = new ArrayList<>();
+for (int num : nums) {
+    int pos = Collections.binarySearch(tails, num);
+    if (pos < 0) pos = -(pos + 1);
+    if (pos == tails.size()) tails.add(num);
+    else tails.set(pos, num);
+}
+// tails.size() is the LIS length
+```
+
+### 24.19 Dijkstra's Algorithm (Weighted Shortest Path)
+
+```java
+int[] dijkstra(List<int[]>[] graph, int src, int n) {
+    int[] dist = new int[n];
+    Arrays.fill(dist, Integer.MAX_VALUE);
+    dist[src] = 0;
+
+    // min-heap: {distance, node}
+    PriorityQueue<int[]> pq = new PriorityQueue<>((a, b) -> a[0] - b[0]);
+    pq.offer(new int[]{0, src});
+
+    while (!pq.isEmpty()) {
+        int[] curr = pq.poll();
+        int d = curr[0], u = curr[1];
+        if (d > dist[u]) continue;    // skip outdated entry
+
+        for (int[] edge : graph[u]) { // edge = {neighbor, weight}
+            int v = edge[0], w = edge[1];
+            if (dist[u] + w < dist[v]) {
+                dist[v] = dist[u] + w;
+                pq.offer(new int[]{dist[v], v});
+            }
+        }
+    }
+    return dist;
+}
+// Time: O((V + E) log V) with binary heap
+```
+
+### 24.20 Interval Problems Template
+
+```java
+// Merge Intervals
+Arrays.sort(intervals, (a, b) -> a[0] - b[0]);
+List<int[]> merged = new ArrayList<>();
+for (int[] interval : intervals) {
+    if (merged.isEmpty() || merged.get(merged.size() - 1)[1] < interval[0]) {
+        merged.add(interval);
+    } else {
+        merged.get(merged.size() - 1)[1] = Math.max(
+            merged.get(merged.size() - 1)[1], interval[1]);
+    }
+}
+
+// Non-overlapping Intervals (min removals) — Greedy: sort by end
+Arrays.sort(intervals, (a, b) -> a[1] - b[1]);
+int end = Integer.MIN_VALUE, removals = 0;
+for (int[] iv : intervals) {
+    if (iv[0] >= end) end = iv[1];   // no overlap, extend
+    else removals++;                  // overlap, skip (remove)
+}
+```
+
+---
+
+## 25. Common Interview Pitfalls & Edge Cases
+
+### Integer Overflow
+
+```java
+// PITFALL: mid calculation
+int mid = (lo + hi) / 2;           // can overflow if lo + hi > Integer.MAX_VALUE
+int mid = lo + (hi - lo) / 2;     // SAFE
+
+// PITFALL: comparator subtraction
+(a, b) -> a - b;                   // overflows for extreme values
+(a, b) -> Integer.compare(a, b);  // SAFE
+
+// PITFALL: multiplication
+int area = width * height;         // may overflow
+long area = (long) width * height; // SAFE — cast BEFORE multiply
+```
+
+### Array vs Collections Edge Cases
+
+```java
+// Arrays.asList returns FIXED-SIZE list (can't add/remove)
+List<String> fixed = Arrays.asList("a", "b");
+fixed.add("c");    // throws UnsupportedOperationException!
+// Fix: wrap in new ArrayList
+List<String> mutable = new ArrayList<>(Arrays.asList("a", "b"));
+
+// Arrays.asList does NOT work with primitive arrays
+int[] arr = {1, 2, 3};
+List<int[]> wrong = Arrays.asList(arr);        // List of ONE int[] element!
+List<Integer> right = Arrays.stream(arr).boxed().collect(Collectors.toList());
+
+// List.of() returns IMMUTABLE list
+List<Integer> immutable = List.of(1, 2, 3);
+immutable.add(4);  // throws UnsupportedOperationException!
+immutable.set(0, 5); // throws too!
+```
+
+### Integer Caching (-128 to 127)
+
+```java
+Integer a = 127, b = 127;
+a == b;           // true (cached)
+
+Integer c = 128, d = 128;
+c == d;           // FALSE! Different objects
+c.equals(d);      // true — ALWAYS use .equals() for Integer comparison
+
+// Or unbox explicitly
+c.intValue() == d.intValue();  // true
+```
+
+### String Comparison
+
+```java
+String a = "hello";
+String b = "hello";
+a == b;           // true (string pool)
+
+String c = new String("hello");
+a == c;           // FALSE! Different objects
+a.equals(c);      // true — ALWAYS use .equals() for String comparison
+```
+
+### null Safety
+
+```java
+// HashMap.get returns null for missing key — can NPE with unboxing
+Map<String, Integer> map = new HashMap<>();
+int val = map.get("missing");     // NullPointerException (unboxing null → int)
+int val = map.getOrDefault("missing", 0);  // SAFE
+
+// TreeMap/TreeSet don't allow null keys (throws NullPointerException)
+TreeMap<String, Integer> tm = new TreeMap<>();
+tm.put(null, 1);  // NullPointerException
+
+// PriorityQueue does not allow null elements
+PriorityQueue<Integer> pq = new PriorityQueue<>();
+pq.offer(null);   // NullPointerException
+```
+
+### Empty Input Edge Cases Checklist
+
+| Scenario | What to Check |
+|----------|---------------|
+| Empty array/string | `nums.length == 0`, `s.isEmpty()` |
+| Single element | Often a base case that needs special handling |
+| All same elements | Does your logic handle no-change scenarios? |
+| Already sorted | Does your algorithm handle the trivial case efficiently? |
+| Negative numbers | `Math.abs(Integer.MIN_VALUE)` overflows! Returns `MIN_VALUE` |
+| All negative | Does your max-subarray / selection logic work? |
+| Integer boundaries | Test with `0`, `1`, `-1`, `MAX_VALUE`, `MIN_VALUE` |
+| Disconnected graph | Run BFS/DFS from all unvisited nodes |
+| Self-loops / duplicate edges | Handle in graph construction |
+
+### Modular Arithmetic (Common in DP / Counting Problems)
+
+```java
+int MOD = 1_000_000_007;  // 10^9 + 7
+
+// Addition
+result = (a + b) % MOD;
+
+// Subtraction (add MOD to avoid negative)
+result = ((a - b) % MOD + MOD) % MOD;
+
+// Multiplication
+result = (int) ((long) a * b % MOD);   // cast to long first!
+
+// Power with modular exponentiation
+long modPow(long base, long exp, long mod) {
+    long result = 1;
+    base %= mod;
+    while (exp > 0) {
+        if ((exp & 1) == 1) result = result * base % mod;
+        exp >>= 1;
+        base = base * base % mod;
+    }
+    return result;
+}
+```
+
+---
+
+> **Final Tip:** Before coding, always clarify: input size (drives time complexity choice), edge cases, whether input is sorted, whether duplicates exist, and whether you should modify the input. This shows interviewer maturity.
 
